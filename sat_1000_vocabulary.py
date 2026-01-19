@@ -2,24 +2,94 @@ import random
 import tkinter as tk
 from tkinter import ttk, messagebox
 from pypdf import PdfReader
+import re
+import logging
+
+logging.getLogger("pypdf").setLevel(logging.CRITICAL)
 
 FILE_PATH = 'SAT1000.pdf'
+# find the vocabulary word and its part of speech. 
+# this will be used to identify the start of a new word
+ENTRY_START_RE = re.compile(r"^[a-z][a-z-]*\s+\([a-z]+\.\)\s+", re.I)
 
-def load_lines(path):
-    """Load non-empty lines from SAT1000.pdf"""
+def extract_page_text(page):
+    return page.extract_text(
+        extraction_mode = "layout",
+        layout_mode_space_vertically = False
+    )
 
-    try:
-        with open(path, 'r', encoding='utf-8') as file:
-            return [line.strip() for line in file if line.strip()]
+def extract_entries_from_page_text(text: str) -> list[str]:
+    """This function splits each pdf page into a list of lines. 
+    Each line is returned without a newline character and all whitespace
+    is removed from each end of the line. All page noise is removed (title, etc)."""
+
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+
+    # find the index of the first line on the page with a vocabulary word
+    start_idx = None
+    for i, ln in enumerate(lines):
+        if ENTRY_START_RE.match(ln.strip()):
+                start_idx = i
+                break
+            
+    if start_idx is None:
+         return []
+    
+    lines = lines[start_idx:]
+
+    # Since the words are in alphabetical order, the header (A, B, C, etc) should be removed
+    lines = [ln for ln in lines if not (len(ln.strip()) == 1 and ln.strip().isalpha() and ln.strip().isupper())]
+    
+    # each entry (word, part of speech, explanation, use in sentence) may take up multiple lines
+    entries: list[str] = [] # final output list
+    current: list[str] = [] # contains line fragments from each word entry
+
+    for ln in lines:
+        if ENTRY_START_RE.match(ln): # starts a new word entry
+            if current: # contains the lines from the previous entry
+                entries.append(_join_entry_parts(current)) # consolidated string entry
+
+            current = ln # start new entry using the current line fragment
+
+        else: # ln doesn't match a new word entry, and so must be a continuation of current entry
+             if current:
+                  current.append(ln)
+                   
+    if current: #handles the last entry on the page
+         entries.append(_join_entry_parts(current))
+
+    return entries # one entry per vocabulary word        
+
+def _join_entry_parts(parts: list[str]) -> str:
+    """
+    Join multi-line entry parts cleanly.
+    Handles hyphenated line breaks: 'deposed-' + 'and' => 'deposedand' is wrong,
+    so we join without a space only when the previous part ends with a hyphen.
+    """
+    out = "" # holds the growing combined string
+    for part in parts:
+        if not out:
+            out = part # first line fragment
+        elif out.endswith("-"):
+            out = out[:-1] + part  # remove hyphen; glue directly
+        else:
+            out += " " + part
+    return " ".join(out.split())  # normalize whitespace
+
+def load_pdf(path):
+    """Load non-empty lines from SAT1000.pdf.
+    return a list of all PDF lines"""
+
+    reader = PdfReader(path)
+    all_lines = []
+
+    for page in reader.pages:
+        text = extract_page_text(page)
+        all_lines.extend(extract_entries_from_page_text(text))
         
-    except FileNotFoundError:
-        messagebox.showerror("File Not Found", f"Could not find: {path}")
-        return []
-    
-    except Exception as e:
-        messagebox.showerror("Error", f"Could not read file:\n{e}")
-        return []
-    
+    print(all_lines[0])
+    return all_lines
+        
 class VocabularyApp(tk.Tk):
     """Builds the application window"""
     def __init__(self, lines):
@@ -159,6 +229,6 @@ class VocabularyApp(tk.Tk):
 
 
 if __name__ == "__main__":
-    lines = load_lines(FILE_PATH)
-    app = VocabularyApp(lines)
-    app.mainloop()
+    pdf = load_pdf(FILE_PATH)
+    #app = VocabularyApp(pdf)
+    #app.mainloop()
