@@ -49,7 +49,7 @@ def extract_entries_from_page_text(text: str) -> list[str]:
             if current: # contains the lines from the previous entry
                 entries.append(_join_entry_parts(current)) # consolidated string entry
 
-            current = ln # start new entry using the current line fragment
+            current = [ln] # start new entry using the current line fragment
 
         else: # ln doesn't match a new word entry, and so must be a continuation of current entry
              if current:
@@ -87,7 +87,7 @@ def load_pdf(path):
         text = extract_page_text(page)
         all_lines.extend(extract_entries_from_page_text(text))
         
-    print(all_lines[0])
+    print(all_lines[0:10])
     return all_lines
         
 class VocabularyApp(tk.Tk):
