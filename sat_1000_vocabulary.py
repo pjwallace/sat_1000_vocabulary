@@ -1,212 +1,174 @@
 import random 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from pypdf import PdfReader
-import re
-import logging
 
-logging.getLogger("pypdf").setLevel(logging.CRITICAL)
 
-FILE_PATH = 'SAT1000.pdf'
-# find the vocabulary word and its part of speech. 
-# this will be used to identify the start of a new word
-ENTRY_START_RE = re.compile(r"^[a-z][a-z-]*\s+\([a-z]+\.\)\s+", re.I)
+FILE_PATH = 'SAT1000_cleaned.txt'
 
-def extract_page_text(page):
-    return page.extract_text(
-        extraction_mode = "layout",
-        layout_mode_space_vertically = False
-    )
+def load_lines(path):
+    """Load non-empty lines from SAT1000_cleaned.txt"""
 
-def extract_entries_from_page_text(text: str) -> list[str]:
-    """This function splits each pdf page into a list of lines. 
-    Each line is returned without a newline character and all whitespace
-    is removed from each end of the line. All page noise is removed (title, etc)."""
-
-    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
-
-    # find the index of the first line on the page with a vocabulary word
-    start_idx = None
-    for i, ln in enumerate(lines):
-        if ENTRY_START_RE.match(ln.strip()):
-                start_idx = i
-                break
-            
-    if start_idx is None:
-         return []
-    
-    lines = lines[start_idx:]
-
-    # Since the words are in alphabetical order, the header (A, B, C, etc) should be removed
-    lines = [ln for ln in lines if not (len(ln.strip()) == 1 and ln.strip().isalpha() and ln.strip().isupper())]
-    
-    # each entry (word, part of speech, explanation, use in sentence) may take up multiple lines
-    entries: list[str] = [] # final output list
-    current: list[str] = [] # contains line fragments from each word entry
-
-    for ln in lines:
-        if ENTRY_START_RE.match(ln): # starts a new word entry
-            if current: # contains the lines from the previous entry
-                entries.append(_join_entry_parts(current)) # consolidated string entry
-
-            current = [ln] # start new entry using the current line fragment
-
-        else: # ln doesn't match a new word entry, and so must be a continuation of current entry
-             if current:
-                  current.append(ln)
-                   
-    if current: #handles the last entry on the page
-         entries.append(_join_entry_parts(current))
-
-    return entries # one entry per vocabulary word        
-
-def _join_entry_parts(parts: list[str]) -> str:
-    """
-    Join multi-line entry parts cleanly.
-    Handles hyphenated line breaks: 'deposed-' + 'and' => 'deposedand' is wrong,
-    so we join without a space only when the previous part ends with a hyphen.
-    """
-    out = "" # holds the growing combined string
-    for part in parts:
-        if not out:
-            out = part # first line fragment
-        elif out.endswith("-"):
-            out = out[:-1] + part  # remove hyphen; glue directly
-        else:
-            out += " " + part
-    return " ".join(out.split())  # normalize whitespace
-
-def load_pdf(path):
-    """Load non-empty lines from SAT1000.pdf.
-    return a list of all PDF lines"""
-
-    reader = PdfReader(path)
-    all_lines = []
-
-    for page in reader.pages:
-        text = extract_page_text(page)
-        all_lines.extend(extract_entries_from_page_text(text))
+    try:
+        with open(path, 'r', encoding='utf-8') as file:
+            return [line.strip() for line in file if line.strip()]
         
-    print(all_lines[0:10])
-    return all_lines
+    except FileNotFoundError:
+        messagebox.showerror("File Not Found", f"Could not find: {path}")
+        return []
+    
+    except Exception as e:
+        messagebox.showerror("Error", f"Could not read file:\n{e}")
+        return []
         
-class VocabularyApp(tk.Tk):
+class AdvancedVocabularyApp(tk.Tk):
     """Builds the application window"""
     def __init__(self, lines):
         super().__init__() #runs tk.TK's window initialization code first
 
         # window configuration
-        self.title("SAT Vocabulary Practice")
+        self.title("SAT Advanced Vocabulary Practice")
         self.geometry("865x545")
         self.minsize(780, 495)
 
         # initialize attributes (instance variables)
-        self.lines = lines
+        self.all_lines = lines[:] # immutable list of words
+        self.remaining_lines = lines[:] # mutable list of words (word removed after it is reviewed)
         self.current_word = ""
+        self.current_part_of_speech = ""
         self.current_definition = ""
-
+        self.current_sentence_usage = ""
+        self.words_attempted = 0
+        self.total_words = len(self.all_lines)
+        self.completed = False # will be set to True after all words reviewed
+        
         # create the user interface. Helper method for use inside the class
         self._build_ui()
 
-        if not self.lines:
+        if not self.all_lines:
             # Disable controls if we have no data
             self.submit_btn.configure(state="disabled")
             self.next_btn.configure(state="disabled")
-        else:
-            self.next_word()
+        #else:
+            #self._update_counter()
+            #self.next_word()
 
     def _build_ui(self):
         container = ttk.Frame(self, padding=16)
         container.pack(fill="both", expand=True)
 
-        # widgets styling
+        # --- Styling ---
         style = ttk.Style()
         style.configure(
             "Word.TLabel",
-            font=("Segoe UI", 16, "bold"),
+            font=("Segoe UI", 30, "bold"),
             foreground="#1f4fd8"   # deep blue
         )
         style.configure(
-            "AnswerLabel.TLabel", 
-            font=("Segoe UI", 13, "bold")
+            "FieldLabel.TLabel",
+            font=("Segoe UI", 11, "bold"),
+            foreground="#2c3e50"
         )
-                
-        # Title
-        title = ttk.Label(container, text="SAT Vocabulary Practice", font=("Segoe UI", 16, "bold"))
-        title.pack(anchor="w", pady=(0, 10))
+        style.configure(
+            "FieldValue.TLabel",
+            font=("Segoe UI", 13),
+            foreground="#2c3e50",
+            wraplength=720,
+            justify="center"
+        )
+                       
+        # --- Title ---
+        title = ttk.Label(
+        container,
+        text="SAT Advanced Vocabulary Practice",
+        font=("Segoe UI", 16, "bold")
+        )
+        title.pack(pady=(0, 20))
 
-        # Word display
+        # --- Word display ---
         word_frame = ttk.Frame(container)
-        word_frame.pack(fill="x", pady=(0, 10))
+        word_frame.pack(pady=(0, 10))
 
-        ttk.Label(word_frame, text="Word:", font=("Segoe UI", 11, "bold")).pack(side="left")
         self.word_label = ttk.Label(word_frame, text="", style="Word.TLabel")
-        self.word_label.pack(side="left", padx=(8, 0))
+        self.word_label.pack()
+    
+        # --- Revealed fields (start blank; populated on submit) ---
+        info_frame = ttk.Frame(container)
+        info_frame.pack(fill="x", pady=(10, 0))
 
-        # Student answer
-        ttk.Label(container, text="Type the meaning (not graded):", style="AnswerLabel.TLabel").pack(anchor="w", pady=(6, 4))
-        self.answer_entry = tk.Entry(container, font=("Segoe UI", 14))
-        self.answer_entry.pack(fill="x", pady=(0, 10), ipady=6)
+        left_block = ttk.Frame(info_frame, padding=(40, 0, 0, 0))  # 40px left indent
+        left_block.pack(fill="x", anchor="w")
 
-        # Buttons
-        btn_frame = ttk.Frame(container)
-        btn_frame.pack(fill="x", pady=(18, 16))
+        # Part of speech
+        ttk.Label(left_block, text="Part of speech:", style="FieldLabel.TLabel").pack(anchor="w", pady=(8, 2))
+        self.pos_value = ttk.Label(left_block, text="", style="FieldValue.TLabel")
+        self.pos_value.pack(anchor="w")
+
+        # Definition
+        ttk.Label(left_block, text="Definition:", style="FieldLabel.TLabel").pack(anchor="w", pady=(12, 2))
+        self.def_value = ttk.Label(left_block, text="", style="FieldValue.TLabel")
+        self.def_value.pack(anchor="w")
+
+        # Sentence usage
+        ttk.Label(left_block, text="Sentence usage:", style="FieldLabel.TLabel").pack(anchor="w", pady=(12, 2))
+        self.usage_value = ttk.Label(left_block, text="", style="FieldValue.TLabel")
+        self.usage_value.pack(anchor="w")
+
+        # Spacer so the bottom bar doesn't crowd the content
+        ttk.Frame(container).pack(fill="both", expand=True)
+
+        # --- Bottom bar: buttons + counter ---
+        bottom_bar = ttk.Frame(container)
+        bottom_bar.pack(side="bottom", fill="x", pady=(12, 0))
+
+        # Buttons centered in their own frame
+        btn_frame = ttk.Frame(bottom_bar)
+        btn_frame.pack(side="bottom", pady=(0, 6))        
 
         self.submit_btn = tk.Button(
-                btn_frame, 
-                text="Submit", 
-                font=("Segoe UI", 13, "bold"), 
-                bg="#1f4fd8",        # blue
-                fg="white",
-                activebackground="#173aa8",
-                activeforeground="white",
-                padx=14,
-                pady=6,
-                command=self.submit_answer
+            btn_frame,
+            text="Show Details",
+            font=("Segoe UI", 13, "bold"),
+            bg="#1f4fd8",
+            fg="white",
+            activebackground="#173aa8",
+            activeforeground="white",
+            padx=14,
+            pady=6,
+            command=self.submit_answer
         )
         self.submit_btn.pack(side="left")
 
         self.next_btn = tk.Button(
             btn_frame,
-            text="Next Word", 
+            text="Next Word",
             font=("Segoe UI", 13, "bold"),
-            bg="#e0e0e0",        # neutral gray
-            fg="black",
-            activebackground="#cfcfcf",
+            bg="#f4f6f8",
+            fg="#333333",
+            activebackground="#e6e9ed",
             padx=14,
-            pady=6, 
+            pady=6,
             command=self.next_word
         )
-        self.next_btn.pack(side="left", padx=(12, 0))
+        self.next_btn.pack(side="left", padx=(18, 0))
 
-        # Definition reveal
-        ttk.Label(container, text="Correct meaning:", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(6, 4))
-        self.definition_box = tk.Text(container, height=2, wrap="word")
-        # Force font explicitly
-        self.definition_box.configure(font=("Segoe UI", 14))
-        self.definition_box.configure(
-            bg="#f6f6f6",
-            fg="#333333",
-            relief="flat"
-        )
-        self.definition_box.configure(
-            padx=6,
-            pady=6
-        )       
-        self.definition_box.pack(fill="x", pady=(0, 10))
-        self.definition_box.configure(state="disabled")
+        # Status/counter on the bottom right (same bar)
+        self.counter_label = ttk.Label(bottom_bar, text="")
+        self.counter_label.pack(side="right")
 
-        # Allow pressing Enter to submit
-        self.bind("<Return>", lambda event: self.submit_answer())
-
-    def _set_definition_text(self, text):
-            self.definition_box.configure(state="normal")
-            self.definition_box.delete("1.0", "end")
-            self.definition_box.insert("end", text)
-            self.definition_box.configure(state="disabled")
+        # Enter key triggers submit when enabled
+        self.bind("<Return>", lambda event: self.submit_btn["state"] == "normal" and self.submit_answer())
 
     def next_word(self):
-        line = random.choice(self.lines)
+        if self.completed:
+            self._reset_word_list()
+
+        self._prepare_ui_for_new_word()
+
+        if not self.remaining_lines:
+            self._reset_deck()
+
+        line = random.choice(self.remaining_lines)
+        self.remaining_lines.remove(line)
         word, definition = line.split(None, 1)
 
         # Your capitalization choice:
@@ -218,17 +180,51 @@ class VocabularyApp(tk.Tk):
 
         self.word_label.configure(text=self.current_word)
         self.answer_entry.delete(0, "end")
-        self._set_definition_text("")  # clear definition until submitted
+        #self._set_definition_text("")  # clear definition until submitted
         self.answer_entry.focus_set()
 
     def submit_answer(self):
         # No grading: reveal the correct definition
         self._set_definition_text(self.current_definition)
 
+        # Count this as "attempted" and update UI
+        self.words_attempted += 1
+        self._update_counter()
 
+        # disable the submit button after clicking it and enable the next word button
+        self.submit_btn.configure(state="disabled")
+        self.next_btn.configure(state="normal")
+
+        # If that was the last word, notify and reset on next "Next Word"
+        if len(self.remaining_lines) == 0:
+            messagebox.showinfo(
+                "All Done",
+                "Congratulations! You have reviewed all the words.\n\n"
+                "Clicking 'Next Word' will reset the word list and your progress."
+                )
+            self.completed = True
+            self.next_btn.configure(text="Restart")
+
+    def _update_counter(self):
+        self.counter_label.configure(
+            text=f"{self.words_attempted} words answered out of {self.total_words}"
+        )
+
+    def _prepare_ui_for_new_word(self):
+    # Clear definition and re-enable submit button for a new attempt
+        self._set_definition_text("")
+        self.submit_btn.configure(state="normal")
+        self.next_btn.configure(state="disabled")
+        self._update_counter()
+
+    def _reset_word_list(self):
+        self.remaining_lines = self.all_lines[:]
+        self.words_attempted = 0
+        self.completed = False
+        self.next_btn.configure(text="Next Word")
 
 
 if __name__ == "__main__":
-    pdf = load_pdf(FILE_PATH)
-    #app = VocabularyApp(pdf)
-    #app.mainloop()
+    text = load_lines(FILE_PATH)
+    app = AdvancedVocabularyApp(text)
+    app.mainloop()
