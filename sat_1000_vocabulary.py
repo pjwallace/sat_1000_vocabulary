@@ -1,9 +1,21 @@
 import random 
 import tkinter as tk
 from tkinter import ttk, messagebox
-
+import re
 
 FILE_PATH = 'SAT1000_cleaned.txt'
+
+# some words have multiple definitions and sentence usages associated with them
+SENSE_RE = re.compile(
+    r"""
+    \s*
+    (?:(?P<num>\d+)\.\s*)?
+    \((?P<pos>[^)]+)\)\s*
+    (?P<definition>.*?)\s*
+    \((?P<usage>[^)]+)\)
+    """, re.VERBOSE
+)
+
 
 def load_lines(path):
     """Load non-empty lines from SAT1000_cleaned.txt"""
@@ -40,6 +52,11 @@ class AdvancedVocabularyApp(tk.Tk):
         self.words_attempted = 0
         self.total_words = len(self.all_lines)
         self.completed = False # will be set to True after all words reviewed
+
+        # some words have multiple definitions
+        self.current_senses = []
+        self.current_sense_index = 0
+        self.details_revealed = False
         
         # create the user interface. Helper method for use inside the class
         self._build_ui()
@@ -48,9 +65,9 @@ class AdvancedVocabularyApp(tk.Tk):
             # Disable controls if we have no data
             self.submit_btn.configure(state="disabled")
             self.next_btn.configure(state="disabled")
-        #else:
+        else:
             #self._update_counter()
-            #self.next_word()
+            self.next_word()
 
     def _build_ui(self):
         container = ttk.Frame(self, padding=16)
@@ -90,6 +107,40 @@ class AdvancedVocabularyApp(tk.Tk):
 
         self.word_label = ttk.Label(word_frame, text="", style="Word.TLabel")
         self.word_label.pack()
+
+        # --- Sense navigation (hidden/disabled unless multiple senses) ---
+        sense_frame = ttk.Frame(container)
+        sense_frame.pack(pady=(0, 6))
+
+        self.sense_prev_btn = tk.Button(
+            sense_frame,
+            text="◀ Prev sense",
+            font=("Segoe UI", 10, "bold"),
+            bg="#f4f6f8",
+            fg="#333333",
+            activebackground="#e6e9ed",
+            padx=10,
+            pady=3,
+            command=self.prev_sense
+        )
+
+        self.sense_prev_btn.pack(side="left")
+
+        self.sense_label = ttk.Label(sense_frame, text="", style="FieldLabel.TLabel")
+        self.sense_label.pack(side="left", padx=12)
+
+        self.sense_next_btn = tk.Button(
+            sense_frame,
+            text="Next sense ▶",
+            font=("Segoe UI", 10, "bold"),
+            bg="#f4f6f8",
+            fg="#333333",
+            activebackground="#e6e9ed",
+            padx=10,
+            pady=3,
+            command=self.next_sense
+        )
+        self.sense_next_btn.pack(side="left")
     
         # --- Revealed fields (start blank; populated on submit) ---
         info_frame = ttk.Frame(container)
@@ -134,7 +185,7 @@ class AdvancedVocabularyApp(tk.Tk):
             activeforeground="white",
             padx=14,
             pady=6,
-            command=self.submit_answer
+            command=self.show_details
         )
         self.submit_btn.pack(side="left")
 
@@ -156,7 +207,7 @@ class AdvancedVocabularyApp(tk.Tk):
         self.counter_label.pack(side="right")
 
         # Enter key triggers submit when enabled
-        self.bind("<Return>", lambda event: self.submit_btn["state"] == "normal" and self.submit_answer())
+        self.bind("<Return>", lambda event: self.submit_btn["state"] == "normal" and self.show_details())
 
     def next_word(self):
         if self.completed:
@@ -165,31 +216,36 @@ class AdvancedVocabularyApp(tk.Tk):
         self._prepare_ui_for_new_word()
 
         if not self.remaining_lines:
-            self._reset_deck()
+            self._reset_word_list()
 
         line = random.choice(self.remaining_lines)
+        
         self.remaining_lines.remove(line)
-        word, definition = line.split(None, 1)
-
-        # Your capitalization choice:
+        sense_dict = self._parse_vocab_line(line)
+        #print(sense_dict)
+        #print(sense_dict['senses'][0]['definition'])
+        word = sense_dict['word']
+       
+        # capitalization
         word = word.capitalize()
-        definition = definition.capitalize()
-
-        self.current_word = word
-        self.current_definition = definition
-
+        self.current_word = word       
         self.word_label.configure(text=self.current_word)
-        self.answer_entry.delete(0, "end")
-        #self._set_definition_text("")  # clear definition until submitted
-        self.answer_entry.focus_set()
 
-    def submit_answer(self):
-        # No grading: reveal the correct definition
-        self._set_definition_text(self.current_definition)
+        # some words have multiple definitions and sentence usages
+        self.current_senses = sense_dict["senses"]  
+        self.current_sense_index = 0
+        print(self.current_senses)
 
+        self.submit_btn.configure(state="normal")
+        self.next_btn.configure(state="disabled")  # enforce “Show Details first”
+        
+    def show_details(self):
         # Count this as "attempted" and update UI
         self.words_attempted += 1
         self._update_counter()
+
+        self.details_revealed = True
+        self._render_current_sense()
 
         # disable the submit button after clicking it and enable the next word button
         self.submit_btn.configure(state="disabled")
@@ -205,16 +261,92 @@ class AdvancedVocabularyApp(tk.Tk):
             self.completed = True
             self.next_btn.configure(text="Restart")
 
+    def _render_current_sense(self):
+        if not self.current_senses:
+            self._prepare_ui_for_new_word()
+            return
+        
+        # get the appropriate list item (which is a dictionary) for display
+        s = self.current_senses[self.current_sense_index]
+        self.pos_value.configure(text=s['pos'].capitalize())
+        self.def_value.configure(text=s['definition'].capitalize())
+        self.usage_value.configure(text=s['usage'].capitalize())
+
+        self._update_sense_controls()
+
+    def next_sense(self):
+        # Navigation only works after sense details have been displayed
+        if not self.details_revealed:
+            return
+        if self.current_sense_index < len(self.current_senses) - 1:
+            self.current_sense_index += 1
+            self._render_current_sense()
+
+    def prev_sense(self):
+        # Navigation only works after sense details have been displayed
+        if not self.details_revealed:
+            return
+        if self.current_sense_index > 0:
+            self.current_sense_index -= 1
+            self._render_current_sense()
+
+    def _update_sense_controls(self):
+        total = len(self.current_senses)
+
+        if total <=1:
+            self.sense_label.configure(text="")
+            self.sense_prev_btn.configure(state="disabled")
+            self.sense_next_btn.configure(state="disabled")
+            return
+        
+        # show "Sense 1/2" etc
+        self.sense_label.configure(text=f"Sense {self.current_sense_index + 1}/{total}")
+        # enable/disable at ends
+        self.sense_prev_btn.configure(state=("normal" if self.current_sense_index > 0 else "disabled"))
+        self.sense_next_btn.configure(state=("normal" if self.current_sense_index < total - 1 else "disabled"))
+
     def _update_counter(self):
         self.counter_label.configure(
             text=f"{self.words_attempted} words answered out of {self.total_words}"
         )
 
+    def _parse_vocab_line(self, line:str) -> dict:
+        # removing leading and ending spaces, single quotes, and double quotes
+        line = line.strip().strip("'").strip('"')
+
+        line_parts = line.split(None, 1)
+        if len(line_parts) != 2:
+            raise ValueError(f"Bad line (no remainder after word): {line!r}")
+        
+        word = line_parts[0]
+        rest_of_line = line_parts[1] #POS, definition, sentence usage
+
+        # some words have multiple 'senses': 2 or more definitions
+        senses = []
+        for match in SENSE_RE.finditer(rest_of_line):
+            num = match.group("num")
+            senses.append({
+                "num": int(num) if num else None,   
+                "pos": match.group("pos").strip(),
+                "definition": " ".join(match.group("definition").split()),
+                "usage": " ".join(match.group("usage").split())
+            })
+
+        if not senses:
+            raise ValueError(f"Bad line (no senses parsed): {line!r}")
+        
+        return {'word' : word, 'senses' : senses}
+    
     def _prepare_ui_for_new_word(self):
-    # Clear definition and re-enable submit button for a new attempt
-        self._set_definition_text("")
-        self.submit_btn.configure(state="normal")
-        self.next_btn.configure(state="disabled")
+    # Clear the window and disable the sense buttons
+        self.pos_value.configure(text="")
+        self.def_value.configure(text="")
+        self.usage_value.configure(text="")
+        self.sense_label.configure(text="")
+        self.sense_prev_btn.configure(state="disabled")
+        self.sense_next_btn.configure(state="disabled")
+        #self.submit_btn.configure(state="normal")
+        #self.next_btn.configure(state="disabled")
         self._update_counter()
 
     def _reset_word_list(self):
@@ -226,5 +358,6 @@ class AdvancedVocabularyApp(tk.Tk):
 
 if __name__ == "__main__":
     text = load_lines(FILE_PATH)
+    text = text[:10]
     app = AdvancedVocabularyApp(text)
     app.mainloop()
