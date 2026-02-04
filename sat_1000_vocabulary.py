@@ -109,11 +109,12 @@ class AdvancedVocabularyApp(tk.Tk):
         self.word_label.pack()
 
         # --- Sense navigation (hidden/disabled unless multiple senses) ---
-        sense_frame = ttk.Frame(container)
-        sense_frame.pack(pady=(0, 6))
+        self.sense_frame = ttk.Frame(container)
+        self.sense_frame.pack_forget()  # start hidden
+        #sense_frame.pack(pady=(0, 6))
 
         self.sense_prev_btn = tk.Button(
-            sense_frame,
+            self.sense_frame,
             text="◀ Prev sense",
             font=("Segoe UI", 10, "bold"),
             bg="#f4f6f8",
@@ -126,11 +127,11 @@ class AdvancedVocabularyApp(tk.Tk):
 
         self.sense_prev_btn.pack(side="left")
 
-        self.sense_label = ttk.Label(sense_frame, text="", style="FieldLabel.TLabel")
+        self.sense_label = ttk.Label(self.sense_frame, text="", style="FieldLabel.TLabel")
         self.sense_label.pack(side="left", padx=12)
 
         self.sense_next_btn = tk.Button(
-            sense_frame,
+            self.sense_frame,
             text="Next sense ▶",
             font=("Segoe UI", 10, "bold"),
             bg="#f4f6f8",
@@ -214,6 +215,7 @@ class AdvancedVocabularyApp(tk.Tk):
             self._reset_word_list()
 
         self._prepare_ui_for_new_word()
+        self.details_revealed = False
 
         if not self.remaining_lines:
             self._reset_word_list()
@@ -222,8 +224,6 @@ class AdvancedVocabularyApp(tk.Tk):
         
         self.remaining_lines.remove(line)
         sense_dict = self._parse_vocab_line(line)
-        #print(sense_dict)
-        #print(sense_dict['senses'][0]['definition'])
         word = sense_dict['word']
        
         # capitalization
@@ -234,7 +234,10 @@ class AdvancedVocabularyApp(tk.Tk):
         # some words have multiple definitions and sentence usages
         self.current_senses = sense_dict["senses"]  
         self.current_sense_index = 0
-        print(self.current_senses)
+        
+        
+        self._set_sense_nav_visibility()
+        self._update_sense_controls()
 
         self.submit_btn.configure(state="normal")
         self.next_btn.configure(state="disabled")  # enforce “Show Details first”
@@ -246,6 +249,7 @@ class AdvancedVocabularyApp(tk.Tk):
 
         self.details_revealed = True
         self._render_current_sense()
+        self._set_sense_nav_visibility()
 
         # disable the submit button after clicking it and enable the next word button
         self.submit_btn.configure(state="disabled")
@@ -260,6 +264,16 @@ class AdvancedVocabularyApp(tk.Tk):
                 )
             self.completed = True
             self.next_btn.configure(text="Restart")
+
+    def _set_sense_nav_visibility(self):
+        """Show sense navigation only when multiple senses exist."""
+        total = len(self.current_senses) if self.current_senses else 0
+
+        if total > 1:
+            self.sense_frame.pack(pady=(0, 6))
+        else:
+            self.sense_frame.pack_forget()
+
 
     def _render_current_sense(self):
         if not self.current_senses:
@@ -293,15 +307,19 @@ class AdvancedVocabularyApp(tk.Tk):
     def _update_sense_controls(self):
         total = len(self.current_senses)
 
-        if total <=1:
+        if total <=1 or not self.details_revealed:
             self.sense_label.configure(text="")
             self.sense_prev_btn.configure(state="disabled")
             self.sense_next_btn.configure(state="disabled")
+            self.sense_frame.pack_forget()
             return
+        
+        # Show the frame 
+        self.sense_frame.pack(pady=(0, 6))
         
         # show "Sense 1/2" etc
         self.sense_label.configure(text=f"Sense {self.current_sense_index + 1}/{total}")
-        # enable/disable at ends
+        # enable/disable
         self.sense_prev_btn.configure(state=("normal" if self.current_sense_index > 0 else "disabled"))
         self.sense_next_btn.configure(state=("normal" if self.current_sense_index < total - 1 else "disabled"))
 
@@ -345,8 +363,10 @@ class AdvancedVocabularyApp(tk.Tk):
         self.sense_label.configure(text="")
         self.sense_prev_btn.configure(state="disabled")
         self.sense_next_btn.configure(state="disabled")
-        #self.submit_btn.configure(state="normal")
-        #self.next_btn.configure(state="disabled")
+
+        # Always hide sense navigation for a new word
+        self.sense_frame.pack_forget()
+
         self._update_counter()
 
     def _reset_word_list(self):
