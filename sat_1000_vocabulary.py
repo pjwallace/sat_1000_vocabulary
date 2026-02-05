@@ -16,6 +16,14 @@ SENSE_RE = re.compile(
     """, re.VERBOSE
 )
 
+# part of speech mapping for display
+POS_MAP = {
+    "v.": "Verb",
+    "n.": "Noun",
+    "adj.": "Adjective",
+    "adv.": "Adverb"
+}
+
 
 def load_lines(path):
     """Load non-empty lines from SAT1000_cleaned.txt"""
@@ -90,7 +98,8 @@ class AdvancedVocabularyApp(tk.Tk):
             font=("Segoe UI", 13),
             foreground="#2c3e50",
             wraplength=720,
-            justify="center"
+            justify="left",
+            anchor="w"
         )
                        
         # --- Title ---
@@ -172,9 +181,13 @@ class AdvancedVocabularyApp(tk.Tk):
         bottom_bar = ttk.Frame(container)
         bottom_bar.pack(side="bottom", fill="x", pady=(12, 0))
 
-        # Buttons centered in their own frame
+        # Counter at the VERY bottom-right
+        self.counter_label = ttk.Label(bottom_bar, text="")
+        self.counter_label.pack(side="bottom", anchor="e", padx=(0, 6), pady=(0, 2))
+
+        # Buttons just above the counter
         btn_frame = ttk.Frame(bottom_bar)
-        btn_frame.pack(side="bottom", pady=(0, 6))        
+        btn_frame.pack(side="bottom", pady=(0, 6))
 
         self.submit_btn = tk.Button(
             btn_frame,
@@ -203,9 +216,6 @@ class AdvancedVocabularyApp(tk.Tk):
         )
         self.next_btn.pack(side="left", padx=(18, 0))
 
-        # Status/counter on the bottom right (same bar)
-        self.counter_label = ttk.Label(bottom_bar, text="")
-        self.counter_label.pack(side="right")
 
         # Enter key triggers submit when enabled
         self.bind("<Return>", lambda event: self.submit_btn["state"] == "normal" and self.show_details())
@@ -282,9 +292,17 @@ class AdvancedVocabularyApp(tk.Tk):
         
         # get the appropriate list item (which is a dictionary) for display
         s = self.current_senses[self.current_sense_index]
-        self.pos_value.configure(text=s['pos'].capitalize())
+
+        # for display, don't abbreviate the part of speech
+        raw_pos = s.get("pos", "").lower()
+        display_pos = POS_MAP.get(raw_pos, raw_pos.rstrip(".").capitalize())
+        self.pos_value.configure(text=display_pos)
+
         self.def_value.configure(text=s['definition'].capitalize())
-        self.usage_value.configure(text=s['usage'].capitalize())
+        
+        self.usage_value.configure(
+            text=self._capitalize_sentence(s['usage'])
+        )
 
         self._update_sense_controls()
 
@@ -325,7 +343,7 @@ class AdvancedVocabularyApp(tk.Tk):
 
     def _update_counter(self):
         self.counter_label.configure(
-            text=f"{self.words_attempted} words answered out of {self.total_words}"
+            text=f"{self.words_attempted} of {self.total_words} words answered"
         )
 
     def _parse_vocab_line(self, line:str) -> dict:
@@ -369,6 +387,13 @@ class AdvancedVocabularyApp(tk.Tk):
 
         self._update_counter()
 
+    def _capitalize_sentence(self, text):
+        '''Capitalizes the first alphabetic character in a sentence'''
+        for i, ch in enumerate(text):
+            if ch.isalpha():
+                return text[:i] + ch.upper() + text[i+1:]
+        return text
+
     def _reset_word_list(self):
         self.remaining_lines = self.all_lines[:]
         self.words_attempted = 0
@@ -378,6 +403,5 @@ class AdvancedVocabularyApp(tk.Tk):
 
 if __name__ == "__main__":
     text = load_lines(FILE_PATH)
-    text = text[:10]
     app = AdvancedVocabularyApp(text)
     app.mainloop()
