@@ -2,8 +2,15 @@ import random
 import tkinter as tk
 from tkinter import ttk, messagebox
 import re
+import json
+import os
+from pathlib import Path
 
+# all 991 words
 FILE_PATH = 'SAT1000_cleaned.txt'
+
+# the json file keeps track of user progress through the word deck
+STATE_PATH = Path("vocab_state.json")
 
 # some words have multiple definitions and sentence usages associated with them
 SENSE_RE = re.compile(
@@ -39,6 +46,45 @@ def load_lines(path):
     except Exception as e:
         messagebox.showerror("Error", f"Could not read file:\n{e}")
         return []
+    
+def load_state() -> dict | None:
+    '''If a json state file exists, return it as a python dictionary'''
+
+    if not STATE_PATH.exists():
+        return None
+    
+    try:
+        # if the json file exists, return it as a python dictionary
+        with STATE_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f)
+        
+    except (OSError, json.JSONDecodeError):
+        # corrupted file
+        return None
+    
+def save_state(state: dict) -> None:
+    '''After a word has been reviewed, progress is saved in a json file'''
+
+    tmp_path = STATE_PATH.with_suffix(".json.tmp")
+
+    # convert python dictionary into a json string
+    data = json.dumps(state, ensure_ascii=False, indent=2)
+
+    # write to a temp file first, in case the program crashes mid-write
+    with tmp_path.open("w", encoding="utf-8") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+    # replaces vocab_state.json with the temp file
+    tmp_path.replace(STATE_PATH)
+
+def clear_state() -> None:
+    '''Deletes the state file'''
+    try:
+        STATE_PATH.unlink()
+    except FileNotFoundError:
+        pass
         
 class AdvancedVocabularyApp(tk.Tk):
     """Builds the application window"""
@@ -299,7 +345,7 @@ class AdvancedVocabularyApp(tk.Tk):
         self.pos_value.configure(text=display_pos)
 
         self.def_value.configure(text=s['definition'].capitalize())
-        
+
         self.usage_value.configure(
             text=self._capitalize_sentence(s['usage'])
         )
