@@ -98,12 +98,20 @@ class AdvancedVocabularyApp(tk.Tk):
 
         # initialize attributes (instance variables)
         self.all_lines = lines[:] # immutable list of words
-        self.remaining_lines = lines[:] # mutable list of words (word removed after it is reviewed)
+        # check if a json state file exists
+        state = load_state()
+        if state:
+            self.remaining_lines = state.get("remaining_lines", self.all_lines[:])
+            self.words_attempted = state.get("words_attempted", 0)
+        else:
+            self.remaining_lines = self.all_lines[:] # mutable list of words (word removed after it is reviewed)
+            self.words_attempted = 0
+
         self.current_word = ""
         self.current_part_of_speech = ""
         self.current_definition = ""
         self.current_sentence_usage = ""
-        self.words_attempted = 0
+        
         self.total_words = len(self.all_lines)
         self.completed = False # will be set to True after all words reviewed
 
@@ -120,7 +128,7 @@ class AdvancedVocabularyApp(tk.Tk):
             self.submit_btn.configure(state="disabled")
             self.next_btn.configure(state="disabled")
         else:
-            #self._update_counter()
+            self._update_counter()
             self.next_word()
 
     def _build_ui(self):
