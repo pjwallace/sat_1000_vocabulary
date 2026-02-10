@@ -111,6 +111,7 @@ class AdvancedVocabularyApp(tk.Tk):
         self.current_part_of_speech = ""
         self.current_definition = ""
         self.current_sentence_usage = ""
+        self.current_line = None
         
         self.total_words = len(self.all_lines)
         self.completed = False # will be set to True after all words reviewed
@@ -285,8 +286,8 @@ class AdvancedVocabularyApp(tk.Tk):
             self._reset_word_list()
 
         line = random.choice(self.remaining_lines)
+        self.current_line = line
         
-        self.remaining_lines.remove(line)
         sense_dict = self._parse_vocab_line(line)
         word = sense_dict['word']
        
@@ -307,9 +308,20 @@ class AdvancedVocabularyApp(tk.Tk):
         self.next_btn.configure(state="disabled")  # enforce “Show Details first”
         
     def show_details(self):
+        if self.details_revealed:
+            return
+        
         # Count this as "attempted" and update UI
         self.words_attempted += 1
         self._update_counter()
+
+        self.remaining_lines.remove(self.current_line)
+
+        # save progress/state
+        save_state({
+            "words_attempted": self.words_attempted,
+            "remaining_lines": self.remaining_lines
+        })
 
         self.details_revealed = True
         self._render_current_sense()
@@ -449,10 +461,12 @@ class AdvancedVocabularyApp(tk.Tk):
         return text
 
     def _reset_word_list(self):
+        clear_state()
         self.remaining_lines = self.all_lines[:]
         self.words_attempted = 0
         self.completed = False
         self.next_btn.configure(text="Next Word")
+        self.current_line = None
 
 
 if __name__ == "__main__":
